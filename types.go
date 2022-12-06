@@ -21,6 +21,7 @@ type Pkg struct {
 	Popularity     float64  `json:"Popularity"`
 	OutOfDate      int      `json:"OutOfDate"`
 	Maintainer     string   `json:"Maintainer"`
+	Submitter      string   `json:"Submitter"`
 	FirstSubmitted int      `json:"FirstSubmitted"`
 	LastModified   int      `json:"LastModified"`
 	URLPath        string   `json:"URLPath"`
@@ -34,6 +35,7 @@ type Pkg struct {
 	Groups         []string `json:"Groups"`
 	License        []string `json:"License"`
 	Keywords       []string `json:"Keywords"`
+	CoMaintainers  []string `json:"CoMaintainers"`
 }
 
 func (p *Pkg) String() string {
@@ -47,12 +49,18 @@ const (
 	Name By = iota + 1
 	NameDesc
 	Maintainer
+	Submitter
 	Depends
 	MakeDepends
 	OptDepends
 	CheckDepends
 	None
 	Provides
+	Conflicts
+	Replaces
+	Keywords
+	Groups
+	CoMaintainers
 )
 
 func (by By) String() string {
@@ -63,6 +71,8 @@ func (by By) String() string {
 		return "name-desc"
 	case Maintainer:
 		return "maintainer"
+	case Submitter:
+		return "submitter"
 	case Depends:
 		return "depends"
 	case MakeDepends:
@@ -74,7 +84,17 @@ func (by By) String() string {
 	case None:
 		return ""
 	case Provides:
-		panic("unsupported by RPC engine")
+		return "provides"
+	case Conflicts:
+		return "conflicts"
+	case Replaces:
+		return "replaces"
+	case Keywords:
+		return "keywords"
+	case Groups:
+		return "groups"
+	case CoMaintainers:
+		return "comaintainers"
 	default:
 		panic("invalid By")
 	}
