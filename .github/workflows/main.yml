@@ -1,0 +1,11 @@
+name: Build AUR package
+
+on:
+  workflow_dispatch:     # ← ЭТО ГЛАВНОЕ — добавляет кнопку
+    inputs:
+      package:
+        description: 'Имя пакета из AUR (например php83)'
+        required: true
+        type: string
+  push:                   # ← оставь, если хочешь, чтобы тоже запускалось при пуше
+    branches: [ main ]
