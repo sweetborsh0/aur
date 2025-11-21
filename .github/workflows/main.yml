@@ -1,11 +1,74 @@
 name: Build AUR package
 
 on:
-  workflow_dispatch:     # ← ЭТО ГЛАВНОЕ — добавляет кнопку
+  workflow_dispatch:
     inputs:
       package:
         description: 'Имя пакета из AUR (например php83)'
         required: true
         type: string
-  push:                   # ← оставь, если хочешь, чтобы тоже запускалось при пуше
-    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+
+    container:
+      image: archlinux:base-devel
+      options: --privileged
+
+    steps:
+      - name: Установка инструментов и создание пользователя
+        run: |
+          pacman -Syu --noconfirm git sudo ccache base-devel
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/builder
+
+      - name: Настройка makepkg и ccache
+        run: |
+          echo 'MAKEFLAGS="-j$(nproc)"' >> /etc/makepkg.conf
+          echo 'BUILDENV=(ccache !distcc color !sign)' >> /etc/makepkg.conf
+
+      - name: Кэш ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/builder/.ccache
+          key: ccache-${{ github.event.inputs.package }}-${{ github.run_id }}
+
+      - name: Checkout репозитория
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Сборка пакета
+        run: |
+          sudo -u builder bash -c "
+            cd /home/builder
+            git clone https://aur.archlinux.org/${{ github.event.inputs.package }}.git
+            cd ${{ github.event.inputs.package }}
+
+            # Фиксы для php83 и других проблемных пакетов
+            sed -i 's/c-client/libc-client/' PKGBUILD 2>/dev/null || true
+
+            makepkg -s --noconfirm --needed
+            mkdir -p /tmp/repo/x86_64
+            mv *.pkg.tar.* /tmp/repo/x86_64/ 2>/dev/null || true
+          "
+
+      - name: Обновление репозитория
+        run: |
+          mkdir -p repo/x86_64
+          cp /tmp/repo/x86_64/* repo/x86_64/ 2>/dev/null || true
+          cd repo/x86_64
+          rm -f myrepo.{db,files}.tar.gz
+          repo-add myrepo.db.tar.gz *.pkg.tar.* 2>/dev/null || true
+
+      - name: Деплой на GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./repo/x86_64
+          force_orphan: true
+          commit_message: "Add ${{ github.event.inputs.package }}"
