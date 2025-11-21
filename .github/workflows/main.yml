@@ -1,48 +1,45 @@
 name: Make Repository
 
 on:
-  push:
-    branches:
-      - master
-      - debug
+  workflow_dispatch:      # ← теперь можно запускать вручную
+    inputs:
+      packages:
+        description: 'Пакеты из AUR (через пробел или новую строку)'
+        required: true
+        default: php83
   schedule:
-    - cron: "0 2 * * *"
-  workflow_dispatch:
+    - cron: "0 2 * * *"    # опционально — каждый день в 2 ночи
 
 jobs:
   build_repository:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+
     steps:
-    - name: Get current time and date
-      id: date
-      run: echo "::set-output name=date::$(date +'%Y-%m-%d %H:%M')"
-      
-    - name: Add keyserver
-      run:  mkdir ~/.gnupg && touch ~/.gnupg/gpg.conf && echo 'keyserver hkps://keys.openpgp.org' >> ~/.gnupg/gpg.conf 
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Build Packages
-      uses: kopp/build-aur-packages@v1
-      with:
-        packages: >
-          php83
+      - name: Build Packages
+        uses: kopp/build-aur-packages@v1
+        with:
+          packages: ${{ inputs.packages || 'php83' }}
 
-          
-    - name: List generated Files
-      run: ls -1 > ${{ github.workspace }}/files.txt
-    - name: Remove the current data from the release
-      uses: kopp/action-delete-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: aurci2
-    - name: Upload Files to Release
-      uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: aurci2
-        name: Build ${{ github.run_number }} at ${{ steps.date.outputs.date }}
-        files: |
-          ${{ github.workspace }}/*
-        draft: false
-        prerelease: false
+      - name: Prepare repository
+        run: |
+          mkdir -p x86_64
+          mv *.pkg.tar.* x86_64/ 2>/dev/null || true
+          cd x86_64
+          repo-add my-aur.db.tar.gz *.pkg.tar.* || true
+
+      - name: Deploy to GitHub Pages (онлайн-репозиторий!)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./x86_64
+          force_orphan: true
+          commit_message: "Update: ${{ inputs.packages }}"
+
+      - name: Done
+        run: echo "Готово! Репозиторий доступен по https://$GITHUB_REPOSITORY_OWNER.github.io/${{ github.repository }}/"
