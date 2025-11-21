@@ -1,17 +1,15 @@
-name: Make Repository
+name: Build AUR Repository
 
 on:
-  workflow_dispatch:      # ← теперь можно запускать вручную
+  workflow_dispatch:
     inputs:
       packages:
-        description: 'Пакеты из AUR (через пробел или новую строку)'
+        description: 'Пакеты из AUR (через пробел)'
         required: true
         default: php83
-  schedule:
-    - cron: "0 2 * * *"    # опционально — каждый день в 2 ночи
 
 jobs:
-  build_repository:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -21,25 +19,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Packages
+      - name: Build packages
         uses: kopp/build-aur-packages@v1
         with:
-          packages: ${{ inputs.packages || 'php83' }}
+          packages: ${{ inputs.packages }}
 
-      - name: Prepare repository
+      - name: Prepare repo
         run: |
           mkdir -p x86_64
-          mv *.pkg.tar.* x86_64/ 2>/dev/null || true
+          mv *.pkg.tar.* x86_64/ || true
           cd x86_64
           repo-add my-aur.db.tar.gz *.pkg.tar.* || true
 
-      - name: Deploy to GitHub Pages (онлайн-репозиторий!)
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./x86_64
           force_orphan: true
-          commit_message: "Update: ${{ inputs.packages }}"
-
-      - name: Done
-        run: echo "Готово! Репозиторий доступен по https://$GITHUB_REPOSITORY_OWNER.github.io/${{ github.repository }}/"
+          commit_message: "Update repo: ${{ inputs.packages }}"
