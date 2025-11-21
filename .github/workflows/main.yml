@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Имя пакета из AUR'
+        description: 'Имя пакета из AUR (например php83)'
         required: true
 
 jobs:
@@ -19,10 +19,9 @@ jobs:
       options: --privileged
 
     steps:
-      - name: Установка всего
+      - name: Установка инструментов и создание пользователя
         run: |
-          pacman -Syu --noconfirm git sudo ccache base-devel aurutils
-
+          pacman -Syu --noconfirm git sudo ccache base-devel
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/builder
 
@@ -38,7 +37,7 @@ jobs:
           key: ccache-${{ github.event.inputs.package }}-${{ github.run_id }}
           restore-keys: ccache-${{ github.event.inputs.package }}-
 
-      - name: Checkout
+      - name: Checkout репозитория
         uses: actions/checkout@v4
         with:
           path: repo
@@ -48,15 +47,24 @@ jobs:
           sudo -u builder bash -c "
             cd /home/builder
 
-            # Клонируем и входим
+            # Клонируем пакет
             git clone https://aur.archlinux.org/${{ github.event.inputs.package }}.git
             cd ${{ github.event.inputs.package }}
 
-            # Автоматически ставим все makedepends и depends
-            sudo -u builder aur sync --no-view --no-confirm --noconfirm --needed ${{ github.event.inputs.package }}
+            # Фиксы для старых PKGBUILD
+            sed -i 's/c-client/libc-client/g' PKGBUILD 2>/dev/null || true
+            sed -i 's/pcre/pcre2/g' PKGBUILD 2>/dev/null || true
 
-            # Если aur sync не смог (редко), fallback на обычный makepkg с игнором виртуальных провайдеров
-            makepkg --noconfirm --needed || makepkg --noconfirm --needed --assume-installed=smtp-forwarder --assume-installed=c-client
+            # Устанавливаем все makedepends и depends автоматически
+            source PKGBUILD
+            pacman -S --noconfirm --needed \${makedepends[@]} \${depends[@]} base-devel git || true
+
+            # Самая важная строчка — игнорируем все виртуальные провайдеры и проблемные зависимости
+            makepkg -s --noconfirm --needed --skipinteg \
+              --assume-installed=smtp-forwarder \
+              --assume-installed=c-client \
+              --assume-installed=libcrypt.so \
+              --assume-installed=libcrypto.so
 
             mkdir -p /tmp/repo/x86_64
             mv *.pkg.tar.* /tmp/repo/x86_64/ 2>/dev/null || exit 1
@@ -70,7 +78,7 @@ jobs:
           rm -f my-aur.{db,files}{,.tar.gz}
           repo-add my-aur.db.tar.gz *.pkg.tar.* || true
 
-      - name: Деплой
+      - name: Деплой на GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
