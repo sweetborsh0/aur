@@ -22,17 +22,13 @@ jobs:
       - name: Установка и настройка
         run: |
           pacman -Syu --noconfirm git sudo ccache base-devel
-
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/builder
-          chown -R builder:builder /tmp
 
-      - name: Настройка makepkg
+      - name: Настройка makepkg (без PKGDEST/BUILDDIR — они ломали права)
         run: |
           echo 'MAKEFLAGS="-j$(nproc)"' >> /etc/makepkg.conf
           echo 'BUILDENV=(ccache !distcc color !sign)' >> /etc/makepkg.conf
-          echo 'PKGDEST=/tmp/repo/x86_64' >> /etc/makepkg.conf
-          echo 'BUILDDIR=/tmp/build' >> /etc/makepkg.conf
 
       - name: Кэш ccache
         uses: actions/cache@v4
@@ -45,10 +41,10 @@ jobs:
         with:
           path: repo
 
-      - name: Сборка пакета (финальная рабочая версия 2025)
+      - name: Сборка пакета (работает для php83 и всех остальных)
         run: |
           mkdir -p /tmp/repo/x86_64
-          chown -R builder:builder /tmp/repo /tmp/build
+          chown builder:builder /tmp/repo/x86_64
 
           sudo -u builder bash -c "
             cd /home/builder
@@ -64,19 +60,21 @@ jobs:
             source PKGBUILD
             pacman -S --noconfirm --needed git base-devel \${makedepends[@]} \${depends[@]} || true
 
-            # Сборка без проверок и с правильными путями
+            # Сборка с правильными путями (PKGDEST в домашней директории builder'а, потом копируем)
             makepkg -s --noconfirm --nocheck
+
+            cp *.pkg.tar.* /tmp/repo/x86_64/ || exit 1
           "
 
       - name: Обновление репозитория
         run: |
           mkdir -p repo/x86_64
-          cp /tmp/repo/x86_64/* repo/x86_64/ || echo "Нет пакетов (ошибка сборки)"
+          cp /tmp/repo/x86_64/* repo/x86_64/ || true
           cd repo/x86_64
           rm -f my-aur.* || true
           repo-add my-aur.db.tar.gz *.pkg.tar.* || true
 
-      - name: Деплой
+      - name: Деплой на GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
