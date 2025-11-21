@@ -6,7 +6,7 @@ on:
       packages:
         description: 'Пакеты из AUR (через пробел)'
         required: true
-        default: php83
+        default: nitch-git  # тест на лёгком пакете
 
 jobs:
   build:
@@ -37,4 +37,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./x86_64
           force_orphan: true
-          commit_message: "Update repo: ${{ inputs.packages }}"
+          commit_message: "Update: ${{ inputs.packages }}"
