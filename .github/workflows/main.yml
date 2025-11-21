@@ -1,83 +1,111 @@
-name: Build AUR package
+name: Make Repository
 
 on:
+  push:
+    branches:
+      - master
+      - debug
+  schedule:
+    - cron: "0 2 * * *"
   workflow_dispatch:
-    inputs:
-      package:
-        description: 'Имя пакета из AUR (например php83)'
-        required: true
 
 jobs:
-  build:
+  build_repository:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-
-    container:
-      image: archlinux:base-devel
-      options: --privileged
-
     steps:
-      - name: Установка и настройка
-        run: |
-          pacman -Syu --noconfirm git sudo ccache base-devel
-          useradd -m builder
-          echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/builder
+    - name: Get current time and date
+      id: date
+      run: echo "::set-output name=date::$(date +'%Y-%m-%d %H:%M')"
+      
+    - name: Add keyserver
+      run:  mkdir ~/.gnupg && touch ~/.gnupg/gpg.conf && echo 'keyserver hkps://keys.openpgp.org' >> ~/.gnupg/gpg.conf 
 
-      - name: Настройка makepkg (без PKGDEST/BUILDDIR — они ломали права)
-        run: |
-          echo 'MAKEFLAGS="-j$(nproc)"' >> /etc/makepkg.conf
-          echo 'BUILDENV=(ccache !distcc color !sign)' >> /etc/makepkg.conf
+    - name: Build Packages
+      uses: kopp/build-aur-packages@v1
+      with:
+        packages: >
+          adwsteamgtk
+          binggpt-desktop-bin
+          cambalache
+          deepin-wine-helper
+          deepin-wine-wechat
+          deepin-wine6-stable
+          dotnet-cli-telemetry-optout-git
+          exa-git
+          firefox-gnome-theme-git
+          geopard
+          glfw-git
+          gnome-shell-extension-alphabetical-grid-extension-git
+          gnome-shell-extension-blur-my-shell-git
+          gnome-shell-extension-customize-ibus
+          gnome-shell-extension-just-perfection-desktop-git
+          gnome-shell-extension-pano-git
+          gnome-shell-extension-scroll-workspaces-git
+          gnome-shell-extension-status-area-horizontal-spacing-git
+          hardcode-tray-git
+          harmonyos-sans-git
+          i4tools-bin
+          icu71
+          icu72-bin
+          jd-gui-bin
+          lib32-udis86-git
+          libhandy-git
+          libldap24
+          libre-menu-editor
+          libuiohook
+          linuxqq-nt-bwrap
+          mathematica
+          mcpelauncher-msa-ui-qt-git
+          nautilus-open-any-terminal-git
+          nbtexplorer
+          nitch-git
+          noto-fonts-cjk-sc-vf
+          ns-usbloader
+          nx-udev
+          obs-freeze-filter
+          obs-pipewire-audio-capture-bin
+          obs-plugin-input-overlay-git
+          osu-lazer-git
+          osu-mime
+          otf-monocraft
+          pacman-log-orphans-hook
+          phira-bin
+          qqmusic-bin
+          rockyou
+          rslsync
+          s
+          shimo
+          sif-git
+          snapd-xdg-open-git
+          the-honkers-railway-launcher-bin
+          tlpui-git
+          ttf-monocraft
+          ttf-ms-win10
+          ttf-ms-win10-zh_cn
+          turbowarp-desktop-bin
+          vencord-installer-bin
+          vkd3d-proton-bin
+          whatip-git
+          xmind
+          yt-dlp-drop-in
 
-      - name: Кэш ccache
-        uses: actions/cache@v4
-        with:
-          path: /home/builder/.ccache
-          key: ccache-${{ github.event.inputs.package }}-${{ github.run_id }}
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          path: repo
-
-      - name: Сборка пакета (работает для php83 и всех остальных)
-        run: |
-          mkdir -p /tmp/repo/x86_64
-          chown builder:builder /tmp/repo/x86_64
-
-          sudo -u builder bash -c "
-            cd /home/builder
-
-            git clone https://aur.archlinux.org/${{ github.event.inputs.package }}.git
-            cd ${{ github.event.inputs.package }}
-
-            # Фиксы для старых PKGBUILD
-            sed -i 's/c-client/libc-client/g' PKGBUILD 2>/dev/null || true
-            sed -i 's/pcre/pcre2/g' PKGBUILD 2>/dev/null || true
-
-            # Автоматическая установка зависимостей
-            source PKGBUILD
-            pacman -S --noconfirm --needed git base-devel \${makedepends[@]} \${depends[@]} || true
-
-            # Сборка с правильными путями (PKGDEST в домашней директории builder'а, потом копируем)
-            makepkg -s --noconfirm --nocheck
-
-            cp *.pkg.tar.* /tmp/repo/x86_64/ || exit 1
-          "
-
-      - name: Обновление репозитория
-        run: |
-          mkdir -p repo/x86_64
-          cp /tmp/repo/x86_64/* repo/x86_64/ || true
-          cd repo/x86_64
-          rm -f my-aur.* || true
-          repo-add my-aur.db.tar.gz *.pkg.tar.* || true
-
-      - name: Деплой на GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./repo/x86_64
-          force_orphan: true
-          commit_message: "Add ${{ github.event.inputs.package }}"
+          
+    - name: List generated Files
+      run: ls -1 > ${{ github.workspace }}/files.txt
+    - name: Remove the current data from the release
+      uses: kopp/action-delete-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: aurci2
+    - name: Upload Files to Release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: aurci2
+        name: Build ${{ github.run_number }} at ${{ steps.date.outputs.date }}
+        files: |
+          ${{ github.workspace }}/*
+        draft: false
+        prerelease: false
