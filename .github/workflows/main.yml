@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Имя пакета из AUR (например php83)'
+        description: 'Имя пакета из AUR'
         required: true
-        type: string
 
 jobs:
   build:
@@ -20,22 +19,19 @@ jobs:
       options: --privileged
 
     steps:
-      - name: Установка инструментов
+      - name: Установка всего
         run: |
-          pacman -Syu --noconfirm git sudo ccache base-devel
+          pacman -Syu --noconfirm git sudo ccache base-devel aurutils
 
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/builder
-          mkdir -p /home/builder/.ccache
-          chown -R builder:builder /home/builder/.ccache
 
       - name: Настройка makepkg + ccache
         run: |
           echo 'MAKEFLAGS="-j$(nproc)"' >> /etc/makepkg.conf
           echo 'BUILDENV=(ccache !distcc color !sign)' >> /etc/makepkg.conf
-          echo 'OPTIONS=(strip docs !libtool !staticlibs emptydirs zipman purge !debug lto)' >> /etc/makepkg.conf
 
-      - name: Кэш ccache (ускорение ×20)
+      - name: Кэш ccache
         uses: actions/cache@v4
         with:
           path: /home/builder/.ccache
@@ -47,26 +43,20 @@ jobs:
         with:
           path: repo
 
-      - name: Сборка пакета (с фиксами для php83 и всех проблемных)
+      - name: Полностью автоматическая сборка любого пакета
         run: |
           sudo -u builder bash -c "
             cd /home/builder
+
+            # Клонируем и входим
             git clone https://aur.archlinux.org/${{ github.event.inputs.package }}.git
             cd ${{ github.event.inputs.package }}
 
-            # Критические фиксы 2025 года
-            sed -i 's/c-client/libc-client/g' PKGBUILD 2>/dev/null || true
-            sed -i 's/pcre/pcre2/g' PKGBUILD 2>/dev/null || true
+            # Автоматически ставим все makedepends и depends
+            sudo -u builder aur sync --no-view --no-confirm --noconfirm --needed ${{ github.event.inputs.package }}
 
-            # Устанавливаем всё, что нужно + фикс виртуальных провайдеров
-            pacman -S --noconfirm --needed \
-              patchelf python libedit apache argon2 libxslt postgresql-libs \
-              unixodbc firebird libfreetype6 gd tidy libzip oniguruma \
-              aspell enchant libvoikko hspell hunspell nuspell net-snmp \
-              libsodium libc-client pcre2
-
-            # Главный фикс: игнорируем smtp-forwarder (виртуальный)
-            makepkg -s --noconfirm --needed --assume-installed=smtp-forwarder
+            # Если aur sync не смог (редко), fallback на обычный makepkg с игнором виртуальных провайдеров
+            makepkg --noconfirm --needed || makepkg --noconfirm --needed --assume-installed=smtp-forwarder --assume-installed=c-client
 
             mkdir -p /tmp/repo/x86_64
             mv *.pkg.tar.* /tmp/repo/x86_64/ 2>/dev/null || exit 1
@@ -75,12 +65,12 @@ jobs:
       - name: Обновление репозитория
         run: |
           mkdir -p repo/x86_64
-          cp /tmp/repo/x86_64/* repo/x86_64/ 2>/dev/null || true
+          cp /tmp/repo/x86_64/* repo/x86_64/ || true
           cd repo/x86_64
-          rm -f my-aur.db.tar.gz my-aur.files.tar.gz
+          rm -f my-aur.{db,files}{,.tar.gz}
           repo-add my-aur.db.tar.gz *.pkg.tar.* || true
 
-      - name: Деплой на GitHub Pages
+      - name: Деплой
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
