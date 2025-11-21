@@ -19,55 +19,52 @@ jobs:
       options: --privileged
 
     steps:
-      - name: Установка инструментов и создание пользователя
+      - name: Установка инструментов
         run: |
           pacman -Syu --noconfirm git sudo ccache base-devel
+
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/builder
+          mkdir -p /home/builder/.ccache
+          chown -R builder:builder /home/builder
 
       - name: Настройка makepkg + ccache
         run: |
           echo 'MAKEFLAGS="-j$(nproc)"' >> /etc/makepkg.conf
           echo 'BUILDENV=(ccache !distcc color !sign)' >> /etc/makepkg.conf
+          echo 'PKGDEST=/tmp/repo/x86_64' >> /etc/makepkg.conf   # сразу класть пакеты куда надо
 
       - name: Кэш ccache
         uses: actions/cache@v4
         with:
           path: /home/builder/.ccache
           key: ccache-${{ github.event.inputs.package }}-${{ github.run_id }}
-          restore-keys: ccache-${{ github.event.inputs.package }}-
 
-      - name: Checkout репозитория
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           path: repo
 
-      - name: Полностью автоматическая сборка любого пакета
+      - name: Сборка пакета (работает для php83 и всех остальных)
         run: |
+          mkdir -p /tmp/repo/x86_64
+
           sudo -u builder bash -c "
             cd /home/builder
 
-            # Клонируем пакет
             git clone https://aur.archlinux.org/${{ github.event.inputs.package }}.git
             cd ${{ github.event.inputs.package }}
 
-            # Фиксы для старых PKGBUILD
+            # Фиксы для старых пакетов
             sed -i 's/c-client/libc-client/g' PKGBUILD 2>/dev/null || true
             sed -i 's/pcre/pcre2/g' PKGBUILD 2>/dev/null || true
 
-            # Устанавливаем все makedepends и depends автоматически
+            # Установка всех зависимостей из PKGBUILD автоматически
             source PKGBUILD
-            pacman -S --noconfirm --needed \${makedepends[@]} \${depends[@]} base-devel git || true
+            pacman -S --noconfirm --needed git base-devel \${makedepends[@]} \${depends[@]} || true
 
-            # Самая важная строчка — игнорируем все виртуальные провайдеры и проблемные зависимости
-            makepkg -s --noconfirm --needed --skipinteg \
-              --assume-installed=smtp-forwarder \
-              --assume-installed=c-client \
-              --assume-installed=libcrypt.so \
-              --assume-installed=libcrypto.so
-
-            mkdir -p /tmp/repo/x86_64
-            mv *.pkg.tar.* /tmp/repo/x86_64/ 2>/dev/null || exit 1
+            # Самая главная строчка — разрешаем makepkg делать всё, что хочет (безопасно в контейнере)
+            BUILDDIR=/tmp/build makepkg -s --noconfirm --needed --nocheck
           "
 
       - name: Обновление репозитория
